@@ -1,0 +1,64 @@
+name: Release
+
+# Tagging is the release. Nothing is uploaded from a laptop, and no API token
+# exists to leak: PyPI trusts this workflow through OIDC, which has to be
+# registered once on pypi.org as a pending publisher for the project.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Check the tag matches the packaged version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="$(uvx hatch version 2>/dev/null || uv run python -c 'import runnotify; print(runnotify.__version__)')"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "tag $TAG does not match __version__ $VERSION"; exit 1
+          fi
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/runnotify
+    permissions:
+      id-token: write   # the OIDC token PyPI verifies; no secret is stored
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    name: Attach the distribution to a GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
