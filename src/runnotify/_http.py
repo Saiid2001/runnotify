@@ -13,6 +13,7 @@ from a bad token will not be retried, because it will not succeed.
 
 from __future__ import annotations
 
+import contextlib
 import email.utils
 import json
 import logging
@@ -134,8 +135,17 @@ def request(
 
 
 def _safe_body(exc: urllib.error.HTTPError) -> str:
-    """The error body, truncated, or an empty string if it cannot be read."""
+    """The error body, truncated, or an empty string if it cannot be read.
+
+    Closes the error. ``HTTPError`` is itself a file-like object holding the
+    response stream, and an unclosed one is a leaked connection that surfaces
+    only later, as a ``ResourceWarning`` raised from a garbage collector far
+    from the request that caused it.
+    """
     try:
         return exc.read().decode("utf-8", "replace")[:500]
     except Exception:  # pragma: no cover - the stream may already be closed
         return ""
+    finally:
+        with contextlib.suppress(Exception):
+            exc.close()

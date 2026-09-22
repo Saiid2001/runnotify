@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.error
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -83,13 +84,35 @@ class FakeOpener:
         return [r.body for r in self.requests]
 
 
+class WarningBody(io.BytesIO):
+    """A response body that complains, like a real one, if it is never closed.
+
+    A real ``HTTPError`` wraps the response stream — a socket, or a tempfile once
+    urllib spools it — and both emit a ``ResourceWarning`` from ``__del__`` when
+    collected unclosed. ``io.BytesIO`` does not, so a fake built on it makes an
+    unclosed error look clean and hides exactly the leak this reproduces.
+    """
+
+    def __init__(self, body: bytes) -> None:
+        super().__init__(body)
+        self.was_closed = False
+
+    def close(self) -> None:
+        self.was_closed = True
+        super().close()
+
+    def __del__(self) -> None:
+        if not self.was_closed:
+            warnings.warn(f"Implicitly cleaning up {self!r}", ResourceWarning, stacklevel=2)
+
+
 def http_error(code: int, headers: dict | None = None, body: bytes = b"boom") -> Any:
     return urllib.error.HTTPError(
         url="https://example.invalid",
         code=code,
         msg="error",
         hdrs=headers or {},  # type: ignore[arg-type]
-        fp=io.BytesIO(body),
+        fp=WarningBody(body),
     )
 
 

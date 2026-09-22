@@ -94,3 +94,30 @@ def test_content_type_and_custom_headers_are_sent() -> None:
     assert sent.headers["content-type"] == "application/json"
     assert sent.headers["authorization"] == "Bearer tok"
     assert sent.body == {"k": "v"}
+
+
+def test_an_error_response_is_closed_not_leaked(recwarn: pytest.WarningsRecorder) -> None:
+    """HTTPError is a file-like object holding the response stream.
+
+    Leaving it open leaks a connection, and the ResourceWarning surfaces from a
+    garbage collector far from the request that caused it — on one interpreter
+    and not another, which is how this reached CI green on Linux and failed on
+    macOS.
+    """
+    import gc
+
+    opener = FakeOpener([http_error(500), http_error(500), FakeResponse(200)])
+    call(opener, [], retries=2)
+    gc.collect()
+    leaks = [w for w in recwarn if issubclass(w.category, ResourceWarning)]
+    assert not leaks, [str(w.message) for w in leaks]
+
+
+def test_a_final_error_is_also_closed(recwarn: pytest.WarningsRecorder) -> None:
+    import gc
+
+    opener = FakeOpener([http_error(401)])
+    with pytest.raises(HttpError):
+        call(opener, [], retries=0)
+    gc.collect()
+    assert not [w for w in recwarn if issubclass(w.category, ResourceWarning)]

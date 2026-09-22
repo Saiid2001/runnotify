@@ -29,15 +29,34 @@ jobs:
             python: "3.12"
           - os: windows-latest
             python: "3.12"
+    # uv picks its own interpreter unless told otherwise, so without this the
+    # version matrix is decorative — every job runs whatever uv resolves.
+    env:
+      UV_PYTHON: ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # No uv.lock is committed: a library should resolve fresh in CI, so
+          # the cache is keyed on the declared dependencies instead.
+          cache-dependency-glob: "pyproject.toml"
       - name: Install
         run: uv sync --group dev
+      - name: Confirm the interpreter is the one this job claims
+        shell: bash
+        run: |
+          ACTUAL="$(uv run python -c 'import sys; print("%d.%d" % sys.version_info[:2])')"
+          echo "requested ${{ matrix.python }}, running $ACTUAL"
+          [ "$ACTUAL" = "${{ matrix.python }}" ]
       - name: Test
-        run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=90
+        run: uv run pytest --cov --cov-report=term-missing
+      - name: Enforce the coverage floor
+        # Only where the whole package runs. The OOM watchdog is POSIX-only and
+        # declines to arm on Windows, so its lines are legitimately unreached
+        # there and the floor would measure the platform, not the tests.
+        if: runner.os == 'Linux'
+        run: uv run coverage report --fail-under=90
 
   lint:
     name: Lint and types
@@ -47,6 +66,9 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          # No uv.lock is committed: a library should resolve fresh in CI, so
+          # the cache is keyed on the declared dependencies instead.
+          cache-dependency-glob: "pyproject.toml"
       - run: uv sync --group dev
       - name: ruff check
         run: uv run ruff check .

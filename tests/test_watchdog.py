@@ -133,6 +133,7 @@ def test_main_rejects_junk_on_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
+@pytest.mark.skipif(os.name == "nt", reason="the watchdog declines to arm on Windows")
 def test_arming_passes_configuration_on_stdin_never_on_the_command_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
